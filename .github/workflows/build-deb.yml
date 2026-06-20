@@ -3,21 +3,20 @@ name: build-deb-and-push
 # 手動觸發。填好 inputs 後跑：build .deb -> 放進 image -> push Docker Hub。
 on:
   workflow_dispatch:
-    # 注意：GitHub 的 workflow_dispatch inputs 上限是 10 個，這裡刻意控制在 9 個。
+    # 注意：GitHub 的 workflow_dispatch inputs 上限是 10 個，這裡控制在 8 個。
     # 進階旋鈕（apt_build_deps / pkg_version / ubuntu_version / source_ref）不放表單，
-    # 改成寫在 recipes/*.env 裡。常用目標建議直接用 recipe，表單只填 mode + recipe + image_tag。
+    # 改寫在 recipes/*.env。image tag 也不放表單，固定自動命名（見下方 Resolve image tag）。
     inputs:
       mode:
-        description: "Build 模式（用了 recipe 時以 recipe 內的 MODE 為準）"
+        # choice 無法逐項說明，這裡用 description 當「決策指引」。
+        description: >-
+          怎麼選？ 有現成 .deb/.ddeb 連結 → url ｜ 原始 repo 內有 debian/ 目錄 → dpkg ｜
+          Go 專案（go.mod / Makefile build Go）→ go ｜ 其它語言、要自己編譯再打包成 deb → fpm。
+          （用了最下面的 recipe 時，以 recipe 內的 MODE 為準。）
         required: true
         type: choice
         options: [url, dpkg, fpm, go]
         default: url
-      recipe:
-        description: "懶人包：recipes/ 下的設定檔名（podman-exporter / gvisor / dbgsym-kernel）。填了就幾乎不用填下面其他欄位。"
-        required: false
-        type: string
-        default: ""
       source_repo:
         description: "【dpkg/fpm/go】要 build 的 GitHub repo：owner/name，可加分支/tag → owner/name@v1.2"
         required: false
@@ -43,16 +42,16 @@ on:
         required: false
         type: string
         default: ""
-      image_tag:
-        description: "最終 image tag，例如 myorg/scan-target:6.17.0-20。留空＝用 mode+時間自動命名"
-        required: false
-        type: string
-        default: ""
       push:
         description: "是否 push 到 Docker Hub（false＝只 build 測試不推）"
         required: false
         type: boolean
         default: true
+      recipe:
+        description: "（懶人包，可留空）填 recipes/ 下的設定檔名（podman-exporter / gvisor / dbgsym-kernel），填了就幾乎不用管上面其他欄位。"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -96,12 +95,24 @@ jobs:
 
       - name: Resolve image tag
         id: tag
+        # 固定自動命名為  <DockerHub帳號>/toeduker:<產品名>-<時間>，不開放表單客製。
+        # 產品名取自實際產出的套件檔名（Debian 慣例 name_version_arch.deb，取第一個底線前）；
+        # 沒有底線的（如 runsc.deb）就去掉副檔名。多個 deb 取第一個。
         run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          pkg_file="$(ls -1 out/*.deb out/*.ddeb 2>/dev/null | head -n1)"
+          base="$(basename "${pkg_file:-package}")"
+          if [ -z "$pkg_file" ]; then
+            product="package"
+          elif case "$base" in *_*) true;; *) false;; esac; then
+            product="${base%%_*}"
           else
-            echo "tag=${{ secrets.DOCKERHUB_USERNAME }}/deb-scan-target:${{ inputs.mode }}-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+            product="${base%.*}"
           fi
+          # 清掉 docker tag 不允許的字元，保險
+          product="$(echo "$product" | tr -c 'a-zA-Z0-9_.-' '-' | sed 's/-*$//')"
+          tag="${{ secrets.DOCKERHUB_USERNAME }}/toeduker:${product}-$(date +%Y%m%d-%H%M%S)"
+          echo "由產出套件 '$base' 推得產品名 '$product' → image: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         if: ${{ inputs.push }}

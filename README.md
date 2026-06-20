@@ -23,24 +23,39 @@
    - `DOCKERHUB_TOKEN`（Docker Hub access token）
 3. 到 Actions → **build-deb-and-push** → **Run workflow**，填 inputs。
 
-> **90% 的情況：只要選 `mode`、填 `recipe`（或 `url` 模式的 `deb_urls`）、`image_tag` 三格就好，其餘留空。**
-> 表單只有 9 個欄位，每個 description 都標了適用模式（如 `【url】`、`【fpm/go】`）——不是你那個模式的就留白。
+> **90% 的情況：只要選 `mode`、填 `deb_urls`（或用最下面的 `recipe`）就好，其餘留空。**
+> 表單共 8 個欄位，每個 description 都標了適用模式（如 `【url】`、`【fpm/go】`）——不是你那個模式的就留白。
 
-### 表單欄位一覽（共 9 個）
+### 先決定 `mode`（怎麼看原始 repo 該用哪個）
+
+| 你的來源長怎樣 | 選 |
+|------|------|
+| 已經有現成的 `.deb`/`.ddeb` 下載連結 | **`url`** |
+| repo 裡有 `debian/` 目錄（自帶 Debian 打包規則） | **`dpkg`** |
+| Go 專案（有 `go.mod`，或 Makefile 是在 build Go） | **`go`** |
+| 其它語言／要自己下指令編譯，再把產物打包成 deb | **`fpm`** |
+
+判斷方式：到該 GitHub repo 首頁看一眼——**有 `debian/` 資料夾 → dpkg**；**有 `go.mod` → go**；
+都沒有但你知道怎麼 build → fpm；根本不用 build、已有 deb 連結 → url。
+（懶得判斷就用 `recipe`，它已把 MODE 一起設好。）
+
+### 表單欄位一覽（共 8 個）
 
 | 欄位 | 適用 | 說明 |
 |------|------|------|
-| `mode` | 全部 | `url` / `dpkg` / `fpm` / `go`（用了 recipe 時以 recipe 內的 MODE 為準） |
-| `recipe` | 可選 | 懶人包：填 `podman-exporter` 等，幾乎不用再填別的 |
+| `mode` | 全部 | `url` / `dpkg` / `fpm` / `go`，見上表 |
 | `source_repo` | dpkg/fpm/go | `owner/name`，要指定分支/tag 寫 `owner/name@v1.2` |
 | `deb_urls` | url | 現成 `.deb`/`.ddeb` 連結，逗號或換行分隔 |
 | `build_cmd` | fpm/go | build 指令，例如 `make binary` |
 | `bin_paths` | fpm/go | 產物 `src=dest`，例如 `bin/app=/usr/bin/app` |
 | `pkg_name` | fpm/go | 套件名稱，預設取 repo 名 |
-| `image_tag` | 全部 | 最終 image tag，留空＝自動命名 |
-| `push` | 全部 | 是否推到 Docker Hub |
+| `push` | 全部 | 是否推到 Docker Hub（false＝只 build 不推） |
+| `recipe` | 可選 | 懶人包（在表單最下面）：填 `podman-exporter` 等，幾乎不用再填別的 |
 
-進階旋鈕刻意**不放表單**（GitHub inputs 上限 10 個）：
+**Image tag 不開放客製**：固定自動命名為 `<DockerHub帳號>/toeduker:<產品名>-<時間>`，
+產品名取自產出的套件檔名（例：`hello_2.10_amd64.deb`→`hello`、`runsc.deb`→`runsc`）。
+
+進階旋鈕也刻意**不放表單**（GitHub inputs 上限 10 個）：
 - `apt_build_deps`、`pkg_version`、`source_ref` → 寫在 recipe 裡（見下）。
 - `ubuntu_version`（base image 版本）→ 固定 `24.04`；要改就改 `Dockerfile.builder` 與
   `Dockerfile.image` 的 `ARG UBUNTU_VERSION=` 預設（它在 runner 上 build，recipe 改不到它）。
@@ -50,8 +65,8 @@
 ```
 mode:     url
 deb_urls: http://ddebs.ubuntu.com/pool/main/l/linux-hwe-6.17/linux-image-...-dbgsym_..._amd64.ddeb
-image_tag: myorg/scan-target:6.17.0-20
 ```
+產出 image 會自動命名為 `<你的DockerHub帳號>/toeduker:linux-image-...-dbgsym-<時間>`。
 
 ### 範例 2：從 Go 專案 build（prometheus-podman-exporter）
 
