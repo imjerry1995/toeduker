@@ -6,6 +6,9 @@
 這是 `linux-dbgsym-crash` 的通用化版本：除了「直接放現成 deb」之外，
 還能從 GitHub 原始碼自動 build 出 deb。
 
+> 產出的 image 一律叫 **`<你的DockerHub帳號>/toeduker`**，tag 自動帶上產品名與時間
+> （例：`你的帳號/toeduker:hello-20260620-1530`）。不需要、也不能在表單自訂 image 名稱。
+
 ## 支援的四種模式（MODE）
 
 | MODE  | 適用情境 | 必填 inputs |
