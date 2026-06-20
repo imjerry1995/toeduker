@@ -11,7 +11,6 @@ RUN apt-get update -qq && \
 
 COPY build.sh /work/build.sh
 COPY builders /work/builders
-COPY recipes /work/recipes
 RUN chmod +x /work/build.sh /work/builders/*.sh
 
 WORKDIR /work

@@ -3,16 +3,17 @@ name: build-deb-and-push
 # 手動觸發。填好 inputs 後跑：build .deb -> 放進 image -> push Docker Hub。
 on:
   workflow_dispatch:
-    # 注意：GitHub 的 workflow_dispatch inputs 上限是 10 個，這裡控制在 8 個。
-    # 進階旋鈕（apt_build_deps / pkg_version / ubuntu_version / source_ref）不放表單，
-    # 改寫在 recipes/*.env。image tag 也不放表單，固定自動命名（見下方 Resolve image tag）。
+    # 注意：GitHub 的 workflow_dispatch inputs 上限是 10 個，這裡是 9 個。
+    # 不放表單的：image tag（固定自動命名，見 Resolve image tag）、ubuntu_version
+    # （固定 24.04，要改改 Dockerfile 的 ARG）、pkg_version（自動 0.0.0+日期）。
+    # 憑證一律走 repo Secrets（DOCKERHUB_USERNAME/TOKEN），不開放當 input 填——
+    # 因為 workflow_dispatch 的 input 值會顯示在 run 頁面，等於把 token 公開。
     inputs:
       mode:
         # choice 無法逐項說明，這裡用 description 當「決策指引」。
         description: >-
           怎麼選？ 有現成 .deb/.ddeb 連結 → url ｜ 原始 repo 內有 debian/ 目錄 → dpkg ｜
-          Go 專案（go.mod / Makefile build Go）→ go ｜ 其它語言、要自己編譯再打包成 deb → fpm。
-          （用了最下面的 recipe 時，以 recipe 內的 MODE 為準。）
+          Go 專案（有 go.mod）→ go ｜ 其它語言、要自己編譯再打包成 deb → fpm。
         required: true
         type: choice
         options: [url, dpkg, fpm, go]
@@ -28,7 +29,7 @@ on:
         type: string
         default: ""
       build_cmd:
-        description: "【fpm/go】build 指令，例如 make binary"
+        description: "【fpm/go】build 指令，例如 make binary 或 go build -o app ."
         required: false
         type: string
         default: ""
@@ -37,21 +38,26 @@ on:
         required: false
         type: string
         default: ""
+      apt_build_deps:
+        description: "（進階，多半留空）額外要先 apt install 的 build 相依，空白分隔。CGO 專案常需要，例如 libgpgme-dev pkg-config"
+        required: false
+        type: string
+        default: ""
       pkg_name:
         description: "【fpm/go】套件名稱，預設取 repo 名"
         required: false
         type: string
         default: ""
-      push:
-        description: "是否 push 到 Docker Hub（false＝只 build 測試不推）"
-        required: false
-        type: boolean
-        default: true
-      recipe:
-        description: "（懶人包，可留空）填 recipes/ 下的設定檔名（podman-exporter / gvisor / dbgsym-kernel），填了就幾乎不用管上面其他欄位。"
+      go_version:
+        description: "（進階，多半留空）【go】指定 Go 版本，例如 1.25.0；留空＝預設。專案 go.mod 需要較新版時才填"
         required: false
         type: string
         default: ""
+      push:
+        description: "是否 push 到 Docker Hub（預設 false＝只 build 測試不推；要推需先在本 repo 設好 Secrets）"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -72,12 +78,13 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}/out:/out" \
             -e MODE="${{ inputs.mode }}" \
-            -e RECIPE="${{ inputs.recipe }}" \
             -e SOURCE_REPO="${{ inputs.source_repo }}" \
             -e DEB_URLS="${{ inputs.deb_urls }}" \
             -e BUILD_CMD="${{ inputs.build_cmd }}" \
             -e BIN_PATHS="${{ inputs.bin_paths }}" \
+            -e APT_BUILD_DEPS="${{ inputs.apt_build_deps }}" \
             -e PKG_NAME="${{ inputs.pkg_name }}" \
+            -e GO_VERSION="${{ inputs.go_version }}" \
             deb-builder:local
 
       - name: Show produced packages
@@ -110,9 +117,28 @@ jobs:
           fi
           # 清掉 docker tag 不允許的字元，保險
           product="$(echo "$product" | tr -c 'a-zA-Z0-9_.-' '-' | sed 's/-*$//')"
-          tag="${{ secrets.DOCKERHUB_USERNAME }}/toeduker:${product}-$(date +%Y%m%d-%H%M%S)"
+          # namespace 取自 Secret；沒設（例如 push=false 的乾跑）就用無 namespace 的本地 tag，
+          # 避免產生 "/toeduker:..." 這種不合法的 image 名稱。
+          ns="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -n "$ns" ]; then repo="$ns/toeduker"; else repo="toeduker"; fi
+          tag="${repo}:${product}-$(date +%Y%m%d-%H%M%S)"
           echo "由產出套件 '$base' 推得產品名 '$product' → image: $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check push prerequisites
+        if: ${{ inputs.push }}
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # 額外把帳號也登記成遮罩（token 來自 Secret 本就會自動遮，帳號順手保護）。
+          [ -n "$DH_USER" ] && echo "::add-mask::$DH_USER" || true
+          if [ -z "$DH_USER" ] || [ -z "$DH_TOKEN" ]; then
+            echo "::error::push=true 但本 repo 沒有設定 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN。"
+            echo "::error::請到「你自己的 repo」Settings → Secrets and variables → Actions 設定後再跑；"
+            echo "::error::或把 push 設成 false 只做 build 驗證。憑證不要當 input 填（會顯示在 run 頁面）。"
+            exit 1
+          fi
 
       - name: Log in to Docker Hub
         if: ${{ inputs.push }}

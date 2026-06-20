@@ -10,10 +10,10 @@
 #   DEB_URLS      逗號或換行分隔的現成 .deb 下載連結（url 模式用）
 #   PKG_NAME      套件名稱（fpm 模式用，預設取 repo 名）
 #   PKG_VERSION   套件版本（fpm 模式用，預設 0.0.0+日期）
-#   BUILD_CMD     build 指令（fpm/go 模式，覆寫 recipe 預設）
+#   BUILD_CMD     build 指令（fpm/go 模式）
 #   BIN_PATHS     build 完要打包的檔案，格式 src=dest 以逗號分隔（fpm/go 模式）
 #   APT_BUILD_DEPS 額外要先 apt install 的 build 相依（空白分隔）
-#   RECIPE        recipes/ 下的設定檔名（不含副檔名），會在解析 inputs 前先 source
+#   GO_VERSION    Go 版本（go 模式，預設見 build_go.sh）
 #   OUTPUT_DIR    .deb 收集目錄（預設 /out）
 #
 set -euo pipefail
@@ -25,17 +25,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log()  { echo -e "\033[1;34m[build]\033[0m $*"; }
 die()  { echo -e "\033[1;31m[build:error]\033[0m $*" >&2; exit 1; }
-
-# --- 套用 recipe（如果有指定）-----------------------------------------------
-# recipe 是一個可選的 shell 片段，預先設定該專案常用的 MODE/BUILD_CMD/相依 等，
-# 讓使用者在 workflow inputs 只要填 RECIPE=gvisor 就好，不用每次手填一堆參數。
-if [[ -n "${RECIPE:-}" ]]; then
-  recipe_file="$SCRIPT_DIR/recipes/${RECIPE}.env"
-  [[ -f "$recipe_file" ]] || die "找不到 recipe: $recipe_file"
-  log "套用 recipe: $RECIPE"
-  # shellcheck disable=SC1090
-  source "$recipe_file"
-fi
 
 MODE="${MODE:-}"
 [[ -n "$MODE" ]] || die "必須指定 MODE (dpkg|fpm|url|go)"
@@ -52,7 +41,7 @@ normalize_repo() {
 if [[ -n "${SOURCE_REPO:-}" ]]; then
   SOURCE_REPO="$(normalize_repo "$SOURCE_REPO")"
   # 支援 owner/name@ref 寫法：把 @ 後面的 branch/tag/commit 拆進 SOURCE_REF。
-  # （source_ref 已從 workflow 表單移除，改用這個合併寫法或 recipe 設定。）
+  # （source_ref 不放表單，要釘版本就用這個合併寫法。）
   if [[ "$SOURCE_REPO" == *@* ]]; then
     : "${SOURCE_REF:=${SOURCE_REPO##*@}}"
     SOURCE_REPO="${SOURCE_REPO%@*}"

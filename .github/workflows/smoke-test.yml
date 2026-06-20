@@ -12,7 +12,6 @@ on:
     paths:
       - "build.sh"
       - "builders/**"
-      - "recipes/**"
       - "Dockerfile.builder"
       - "Dockerfile.image"
       - ".github/workflows/smoke-test.yml"
