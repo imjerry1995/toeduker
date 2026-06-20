@@ -1,0 +1,17 @@
+# Dockerfile.image — 最終要被內部掃描器拉進去掃的 image。
+# 設計重點：盡量 minimal，只放 .deb，讓掃描器專心掃這些 deb。
+# build 階段會把產生的 *.deb 放在 build context 的 ./out 目錄。
+ARG UBUNTU_VERSION=24.04
+FROM ubuntu:${UBUNTU_VERSION}
+
+LABEL org.opencontainers.image.description="Packaged .deb files staged for internal scanning"
+
+# 把所有產出的 deb 放到固定路徑，方便掃描器與人員定位
+COPY out/*.deb /debs/
+
+# 列出內容，方便 build log 與後續確認
+RUN ls -lh /debs/ && \
+    echo "Contained packages:" && \
+    for d in /debs/*.deb; do dpkg-deb -f "$d" Package Version Architecture 2>/dev/null; echo "---"; done || true
+
+CMD ["sh", "-c", "ls -lh /debs/"]

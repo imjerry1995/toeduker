@@ -1,0 +1,7 @@
+# 這些檔案在 Linux 容器/runner 上執行，必須是 LF。
+# 若被 Windows 的 autocrlf 轉成 CRLF，build.sh 的 shebang 會變成 "bash\r" 而整個 builder 失敗。
+*.sh            text eol=lf
+*.env           text eol=lf
+Dockerfile*     text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf

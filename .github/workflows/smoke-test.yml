@@ -1,0 +1,123 @@
+name: smoke-test
+
+# 冒煙測試：對四種 MODE 各跑一次「能不能成功產出 .deb」，並驗證最終 image 的
+# COPY out/*.deb 也通得過。不 push、不需要 Docker Hub 憑證，純粹確認 build 階段沒爆。
+#
+# 觸發：
+#   - 手動 (workflow_dispatch)
+#   - 改動 build 邏輯時自動跑 (push，限定相關路徑)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "build.sh"
+      - "builders/**"
+      - "recipes/**"
+      - "Dockerfile.builder"
+      - "Dockerfile.image"
+      - ".github/workflows/smoke-test.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 一個模式爆掉不要連帶取消其他模式
+      matrix:
+        include:
+          # url：抓已驗證可下載的小型 deb
+          - name: url
+            mode: url
+            deb_urls: "http://archive.ubuntu.com/ubuntu/pool/main/h/hello/hello_2.10-3build1_amd64.deb"
+            source_repo: ""
+            build_cmd: ""
+            bin_paths: ""
+            apt_build_deps: ""
+            go_version: ""
+            pkg_name: ""
+
+          # fpm：通用打包路徑。用 apt 的 golang-go 當 build 工具（fpm 模式本身不裝 Go）
+          - name: fpm
+            mode: fpm
+            deb_urls: ""
+            source_repo: "golang/example"
+            build_cmd: "go build -o bin/hello ./hello"
+            bin_paths: "bin/hello=/usr/bin/hello"
+            apt_build_deps: "golang-go"
+            go_version: ""
+            pkg_name: "example-hello-fpm"
+
+          # go：測「從 go.dev 下載 toolchain → build → fpm 打包」整條路徑（純 Go，無 CGO）
+          - name: go
+            mode: go
+            deb_urls: ""
+            source_repo: "golang/example"
+            build_cmd: "go build -o bin/hello ./hello"
+            bin_paths: "bin/hello=/usr/bin/hello"
+            apt_build_deps: ""
+            go_version: "1.23.4"
+            pkg_name: "example-hello-go"
+
+          # dpkg：repo 自帶 debian/ 的原生路徑。streadway/hello-debian 是 C + debhelper 的最小範例
+          - name: dpkg
+            mode: dpkg
+            deb_urls: ""
+            source_repo: "streadway/hello-debian"
+            build_cmd: ""
+            bin_paths: ""
+            apt_build_deps: ""
+            go_version: ""
+            pkg_name: ""
+
+    name: smoke (${{ matrix.name }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the builder image
+        run: docker build -f Dockerfile.builder -t deb-builder:local .
+
+      - name: Run builder to produce .deb
+        run: |
+          mkdir -p out
+          docker run --rm \
+            -v "${{ github.workspace }}/out:/out" \
+            -e MODE="${{ matrix.mode }}" \
+            -e SOURCE_REPO="${{ matrix.source_repo }}" \
+            -e DEB_URLS="${{ matrix.deb_urls }}" \
+            -e BUILD_CMD="${{ matrix.build_cmd }}" \
+            -e BIN_PATHS="${{ matrix.bin_paths }}" \
+            -e APT_BUILD_DEPS="${{ matrix.apt_build_deps }}" \
+            -e GO_VERSION="${{ matrix.go_version }}" \
+            -e PKG_NAME="${{ matrix.pkg_name }}" \
+            deb-builder:local
+
+      - name: Assert a .deb was produced
+        run: |
+          count=$(ls -1 out/*.deb 2>/dev/null | wc -l)
+          echo "產出 .deb 數量: $count"
+          ls -lh out/ || true
+          if [ "$count" -lt 1 ]; then
+            echo "::error::[${{ matrix.name }}] 沒有產出任何 .deb，build 視為失敗"
+            exit 1
+          fi
+
+      - name: Build scan-target image (no push) to validate COPY out/*.deb
+        run: docker build -f Dockerfile.image -t smoke-image:${{ matrix.name }} .
+
+      - name: Upload .deb artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.name }}
+          path: out/*.deb
+          if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### smoke (${{ matrix.name }})"
+            echo '```'
+            ls -lh out/ 2>/dev/null || echo "(無產出)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
