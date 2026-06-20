@@ -70,6 +70,34 @@ fi
 # CGO 專案（如 podman-exporter）需要的系統 dev 套件透過 APT_BUILD_DEPS 帶入
 install_extra_deps
 
+# 先提醒：純 Go 不需要 C 編譯器，但需要 CGO 的專案沒有編譯器會以難懂的訊息失敗。
+if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+  log "[go] 注意：容器內目前沒有 C 編譯器。純 Go 專案沒差；但若此專案需要 CGO，"
+  log "[go]       請在 workflow 的 apt_build_deps 補上 gcc 與對應的 -dev 套件後重跑。"
+fi
+
+# 跑 build；失敗時若看起來是 CGO / C 編譯器 / dev header 問題，翻成白話提示。
+run_build() {
+  local logf rc
+  logf="$(mktemp)"
+  set +e
+  "$@" 2>&1 | tee "$logf"
+  rc="${PIPESTATUS[0]}"
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    if grep -qiE 'build constraints exclude all Go files|exec: "?(gcc|cc)"?: executable file not found|cgo: C compiler|C compiler "?cc"? not found|fatal error: .*\.h: No such file|was not found.*pkg-config|pkg-config.*not found|undefined reference to' "$logf"; then
+      rm -f "$logf"
+      die "[go] build 失敗，研判是 CGO / C 編譯相依問題：此專案需要 CGO，但容器缺少 C 編譯器
+      或對應的 -dev header / pkg-config。請在 workflow 的「apt_build_deps」欄位補上需要的套件
+      再重跑，常見起手式：  gcc pkg-config  （再加專案要的 lib，例如
+      libgpgme-dev libbtrfs-dev libdevmapper-dev libsystemd-dev）。原始錯誤見上方 log。"
+    fi
+    rm -f "$logf"
+    die "[go] build 指令失敗（exit $rc）"
+  fi
+  rm -f "$logf"
+}
+
 # --- clone & build ----------------------------------------------------------
 WORK="$(mktemp -d)"
 log "[go] clone https://github.com/${SOURCE_REPO}"
@@ -82,13 +110,13 @@ export GOPATH="${GOPATH:-/tmp/go}"
 
 if [[ -n "${BUILD_CMD:-}" ]]; then
   log "[go] 執行 BUILD_CMD: $BUILD_CMD"
-  bash -c "$BUILD_CMD"
+  run_build bash -c "$BUILD_CMD"
 elif [[ -f Makefile ]] && grep -qE '^(build|binary):' Makefile; then
   log "[go] 偵測到 Makefile，執行 make"
-  make
+  run_build make
 else
   log "[go] 無 BUILD_CMD 也無合適 Makefile target，退回 go build ./..."
-  go build ./...
+  run_build go build ./...
 fi
 
 # --- 打包：重用共用的 fpm 邏輯 ---------------------------------------------
