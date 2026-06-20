@@ -1,4 +1,4 @@
-# deb2docker — 通用 deb 打包 + 掃描用 image 產生器
+# toeduker — 通用 deb 打包 + 掃描用 image 產生器
 
 把任意來源的 `.deb` 包進一個 minimal 的 Docker image，push 到 Docker Hub，
 讓內部掃描器把 image 拉進去時順便掃這些 deb。
