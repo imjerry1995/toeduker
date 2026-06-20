@@ -40,7 +40,7 @@ jobs:
             mode: fpm
             deb_urls: ""
             source_repo: "golang/example"
-            build_cmd: "go build -o bin/hello ./hello"
+            build_cmd: "cd hello && go build -o ../bin/hello ."
             bin_paths: "bin/hello=/usr/bin/hello"
             apt_build_deps: "golang-go"
             go_version: ""
@@ -51,7 +51,7 @@ jobs:
             mode: go
             deb_urls: ""
             source_repo: "golang/example"
-            build_cmd: "go build -o bin/hello ./hello"
+            build_cmd: "cd hello && go build -o ../bin/hello ."
             bin_paths: "bin/hello=/usr/bin/hello"
             apt_build_deps: ""
             go_version: "1.23.4"
