@@ -29,13 +29,8 @@ for url in "${urls[@]}"; do
   if ! file "$OUTPUT_DIR/$fname" | grep -qi 'debian binary package'; then
     die "[url] $fname 不是有效的 Debian 套件"
   fi
-  # ddebs.ubuntu.com 的 dbgsym 套件副檔名常是 .ddeb，內容與 .deb 相同。
-  # 後續 build.sh 的產出檢查與 Dockerfile.image 都以 *.deb 收集，
-  # 這裡統一改名成 .deb，避免 .ddeb 被整條 pipeline 漏掉。
-  if [[ "$fname" == *.ddeb ]]; then
-    newname="${fname%.ddeb}.deb"
-    log "[url] $fname 是 .ddeb，改名為 $newname 以利後續收集"
-    mv -f "$OUTPUT_DIR/$fname" "$OUTPUT_DIR/$newname"
-    fname="$newname"
-  fi
+  # 刻意保留原始副檔名：.ddeb 就維持 .ddeb（內容與 .deb 同為 Debian 套件，
+  # 可照常 dpkg -i / apt install）。後續 build.sh 的產出檢查與 Dockerfile.image
+  # 都已同時收集 *.deb 與 *.ddeb，所以這裡不需要改名。
+  log "[url] 收集 $fname"
 done

@@ -3,70 +3,53 @@ name: build-deb-and-push
 # 手動觸發。填好 inputs 後跑：build .deb -> 放進 image -> push Docker Hub。
 on:
   workflow_dispatch:
+    # 注意：GitHub 的 workflow_dispatch inputs 上限是 10 個，這裡刻意控制在 9 個。
+    # 進階旋鈕（apt_build_deps / pkg_version / ubuntu_version / source_ref）不放表單，
+    # 改成寫在 recipes/*.env 裡。常用目標建議直接用 recipe，表單只填 mode + recipe + image_tag。
     inputs:
       mode:
-        description: "Build 模式"
+        description: "Build 模式（用了 recipe 時以 recipe 內的 MODE 為準）"
         required: true
         type: choice
-        options: [dpkg, fpm, url, go]
+        options: [url, dpkg, fpm, go]
         default: url
       recipe:
-        description: "（可選）使用 recipes/ 下的預設設定檔名，例如 podman-exporter / gvisor / dbgsym-kernel。填了會覆寫部分下列欄位。"
+        description: "懶人包：recipes/ 下的設定檔名（podman-exporter / gvisor / dbgsym-kernel）。填了就幾乎不用填下面其他欄位。"
         required: false
         type: string
         default: ""
       source_repo:
-        description: "要 build 的 GitHub repo（owner/name 或完整 URL）。dpkg/fpm/go 模式需要。"
-        required: false
-        type: string
-        default: ""
-      source_ref:
-        description: "branch / tag / commit（預設 default branch）"
+        description: "【dpkg/fpm/go】要 build 的 GitHub repo：owner/name，可加分支/tag → owner/name@v1.2"
         required: false
         type: string
         default: ""
       deb_urls:
-        description: "url 模式：現成 .deb 連結，逗號或換行分隔"
+        description: "【url】現成 .deb/.ddeb 連結，逗號或換行分隔"
         required: false
         type: string
         default: ""
       build_cmd:
-        description: "fpm/go 模式：build 指令，例如 'make binary'"
+        description: "【fpm/go】build 指令，例如 make binary"
         required: false
         type: string
         default: ""
       bin_paths:
-        description: "fpm/go 模式：要打包的產物 src=dest，逗號分隔"
-        required: false
-        type: string
-        default: ""
-      apt_build_deps:
-        description: "額外 apt build 相依（空白分隔），CGO 專案常需要"
+        description: "【fpm/go】要打包的產物 src=dest，逗號分隔，例如 bin/app=/usr/bin/app"
         required: false
         type: string
         default: ""
       pkg_name:
-        description: "套件名稱（fpm/go），預設取 repo 名"
+        description: "【fpm/go】套件名稱，預設取 repo 名"
         required: false
         type: string
         default: ""
-      pkg_version:
-        description: "套件版本（fpm/go），預設 0.0.0+日期"
-        required: false
-        type: string
-        default: ""
-      ubuntu_version:
-        description: "base image 的 Ubuntu 版本"
-        required: false
-        type: string
-        default: "24.04"
       image_tag:
-        description: "最終 image tag，例如 myorg/scan-target:6.17.0-20。預設用 mode+時間"
+        description: "最終 image tag，例如 myorg/scan-target:6.17.0-20。留空＝用 mode+時間自動命名"
         required: false
         type: string
         default: ""
       push:
-        description: "是否 push 到 Docker Hub（false 則只 build 測試）"
+        description: "是否 push 到 Docker Hub（false＝只 build 測試不推）"
         required: false
         type: boolean
         default: true
@@ -82,10 +65,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build the builder image
-        run: |
-          docker build \
-            --build-arg UBUNTU_VERSION="${{ inputs.ubuntu_version }}" \
-            -f Dockerfile.builder -t deb-builder:local .
+        run: docker build -f Dockerfile.builder -t deb-builder:local .
 
       - name: Run builder to produce .deb
         run: |
@@ -95,23 +75,24 @@ jobs:
             -e MODE="${{ inputs.mode }}" \
             -e RECIPE="${{ inputs.recipe }}" \
             -e SOURCE_REPO="${{ inputs.source_repo }}" \
-            -e SOURCE_REF="${{ inputs.source_ref }}" \
             -e DEB_URLS="${{ inputs.deb_urls }}" \
             -e BUILD_CMD="${{ inputs.build_cmd }}" \
             -e BIN_PATHS="${{ inputs.bin_paths }}" \
-            -e APT_BUILD_DEPS="${{ inputs.apt_build_deps }}" \
             -e PKG_NAME="${{ inputs.pkg_name }}" \
-            -e PKG_VERSION="${{ inputs.pkg_version }}" \
             deb-builder:local
 
       - name: Show produced packages
         run: ls -lh out/
 
-      - name: Upload .deb as artifact
+      - name: Upload packages as artifact
         uses: actions/upload-artifact@v4
         with:
           name: debs
-          path: out/*.deb
+          # 同時收 .deb 與 .ddeb（dbgsym 保留原始副檔名）
+          path: |
+            out/*.deb
+            out/*.ddeb
+          if-no-files-found: warn
 
       - name: Resolve image tag
         id: tag
@@ -134,8 +115,6 @@ jobs:
         with:
           context: .
           file: Dockerfile.image
-          build-args: |
-            UBUNTU_VERSION=${{ inputs.ubuntu_version }}
           push: ${{ inputs.push }}
           tags: ${{ steps.tag.outputs.tag }}
 

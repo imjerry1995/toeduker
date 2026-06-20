@@ -31,7 +31,7 @@ log "[dpkg] dpkg-buildpackage"
 # -us -uc 不簽章；-b 只 build binary（產 .deb，不需 orig tarball）
 dpkg-buildpackage -us -uc -b
 
-# 產出的 .deb 會在上層目錄
-find "$WORK" -maxdepth 1 -name '*.deb' -exec cp -v {} "$OUTPUT_DIR/" \;
+# 產出的 .deb / .ddeb（dbgsym）都在上層目錄，兩種都收（保留原始副檔名）
+find "$WORK" -maxdepth 1 \( -name '*.deb' -o -name '*.ddeb' \) -exec cp -v {} "$OUTPUT_DIR/" \;
 cd /
 rm -rf "$WORK"

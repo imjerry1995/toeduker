@@ -6,12 +6,17 @@ FROM ubuntu:${UBUNTU_VERSION}
 
 LABEL org.opencontainers.image.description="Packaged .deb files staged for internal scanning"
 
-# 把所有產出的 deb 放到固定路徑，方便掃描器與人員定位
-COPY out/*.deb /debs/
+# 把所有產出的套件放到固定路徑，方便掃描器與人員定位。
+# 整個 out/ 一起 COPY：同時涵蓋 .deb 與 .ddeb（dbgsym），且避免
+# 「glob 沒對到檔案時 docker build 會失敗」的問題（例如只有 .ddeb 沒有 .deb）。
+COPY out/ /debs/
 
 # 列出內容，方便 build log 與後續確認
 RUN ls -lh /debs/ && \
     echo "Contained packages:" && \
-    for d in /debs/*.deb; do dpkg-deb -f "$d" Package Version Architecture 2>/dev/null; echo "---"; done || true
+    for d in /debs/*.deb /debs/*.ddeb; do \
+      [ -e "$d" ] || continue; \
+      dpkg-deb -f "$d" Package Version Architecture 2>/dev/null; echo "---"; \
+    done || true
 
 CMD ["sh", "-c", "ls -lh /debs/"]

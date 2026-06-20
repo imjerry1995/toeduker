@@ -51,7 +51,14 @@ normalize_repo() {
 
 if [[ -n "${SOURCE_REPO:-}" ]]; then
   SOURCE_REPO="$(normalize_repo "$SOURCE_REPO")"
+  # 支援 owner/name@ref 寫法：把 @ 後面的 branch/tag/commit 拆進 SOURCE_REF。
+  # （source_ref 已從 workflow 表單移除，改用這個合併寫法或 recipe 設定。）
+  if [[ "$SOURCE_REPO" == *@* ]]; then
+    : "${SOURCE_REF:=${SOURCE_REPO##*@}}"
+    SOURCE_REPO="${SOURCE_REPO%@*}"
+  fi
   export SOURCE_REPO
+  export SOURCE_REF="${SOURCE_REF:-}"
 fi
 
 # 安裝共用基礎工具
@@ -88,5 +95,10 @@ case "$MODE" in
   *)    die "未知的 MODE: $MODE" ;;
 esac
 
-log "完成。產出的 .deb："
-ls -lh "$OUTPUT_DIR"/*.deb 2>/dev/null || die "沒有產出任何 .deb，build 視為失敗"
+log "完成。產出的套件（.deb / .ddeb）："
+# 同時接受 .deb 與 .ddeb（dbgsym）。任一存在即視為成功。
+shopt -s nullglob
+produced=( "$OUTPUT_DIR"/*.deb "$OUTPUT_DIR"/*.ddeb )
+shopt -u nullglob
+[[ "${#produced[@]}" -gt 0 ]] || die "沒有產出任何 .deb/.ddeb，build 視為失敗"
+ls -lh "${produced[@]}"
